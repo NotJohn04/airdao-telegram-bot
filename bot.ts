@@ -4,7 +4,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import AirDaoTokenAbi from "./abi/AirDaoToken.json";
 import { ADTBytecode } from "./constants/AirDaoTokenByteCode";
 import dotenv from "dotenv";
-import { airDaoTestnet } from "./constants/AirDaoChain";
+import { airDaoMainnet, airDaoTestnet } from "./constants/AirDaoChain";
 
 dotenv.config();
 
@@ -19,6 +19,7 @@ bot.onText(/\/start/, (msg) => {
     chatId,
     "Welcome! Use /createwallet to create a new wallet or /importwallet <private_key> to import an existing one."
   );
+  
 });
 
 let account: Account;
@@ -29,10 +30,11 @@ bot.onText(/\/createwallet/, async (msg) => {
   account = privateKeyToAccount(privateKey);
   const client = createWalletClient({
     account,
-    transport: http(),
+    transport: http('https://network.ambrosus.io', {
+      timeout: 100000,
+    }),
     chain: airDaoTestnet
   }).extend(publicActions);
-
   walletClients[chatId] = client;
 
   bot.sendMessage(
@@ -49,7 +51,9 @@ bot.onText(/\/importwallet (.+)/, async (msg, match) => {
     account = privateKeyToAccount(privateKey as `0x${string}`);
     const client = createWalletClient({
       account,
-      transport: http("https://network.ambrosus-test.io"),
+      transport: http("https://network.ambrosus.io", {
+        timeout: 100000,
+      }),
     }).extend(publicActions);
 
     walletClients[chatId] = client;
@@ -61,12 +65,19 @@ bot.onText(/\/importwallet (.+)/, async (msg, match) => {
 });
 
 bot.onText(/\/createtoken/, async (msg) => {
+
+
   const chatId = msg.chat.id;
   if (!walletClients[chatId]) {
     bot.sendMessage(chatId, 'Please create or import a wallet first.');
     return;
   }
 
+  const { gasPrice } = await walletClients[chatId].estimateFeesPerGas({
+    type: 'legacy'
+  })
+
+  console.log(gasPrice)
   // Check user's balance
   const balance = await walletClients[chatId].getBalance({
     address: account.address,
@@ -107,7 +118,9 @@ Type 'confirm' to deploy the contract or 'cancel' to abort.`;
                 abi: AirDaoTokenAbi,
                 bytecode: ADTBytecode,
                 args: [name, symbol, supply],
-                chain: airDaoTestnet,
+                type: 'legacy',
+                chain: airDaoMainnet,
+                gasPrice: 10,
               });
               bot.sendMessage(chatId, `Token creation transaction sent! Transaction hash: ${hash}\n\nPlease wait for the transaction to be mined.`);
             } catch (error) {
