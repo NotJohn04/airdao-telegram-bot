@@ -30,7 +30,7 @@ export const airDaoMainnet = defineChain({
     },
     rpcUrls: {
       default: {
-        http: ['https://network.ambrosus.io'],
+        http: ['https://rpc.airdao.io'],
       },
     },
     blockExplorers: {
