@@ -60,7 +60,7 @@ bot.onText(/\/importwallet (.+)/, async (msg, match) => {
 bot.onText(/\/createtoken/, async (msg) => {
   const chatId = msg.chat.id;
   if (!walletClients[chatId]) {
-    bot.sendMessage(chatId, "Please create or import a wallet first.");
+    bot.sendMessage(chatId, 'Please create or import a wallet first.');
     return;
   }
 
@@ -68,40 +68,50 @@ bot.onText(/\/createtoken/, async (msg) => {
   const balance = await walletClients[chatId].getBalance({
     address: account.address,
   });
-  const minimumBalance = parseEther("0.01"); // Adjust this value as needed
+  const minimumBalance = parseEther('0.01'); // Adjust this value as needed
 
   if (balance < minimumBalance) {
-    bot.sendMessage(
-      chatId,
-      `Insufficient balance. You need at least 0.01 ETH to deploy the contract.`
-    );
+    bot.sendMessage(chatId, `Insufficient balance. You need at least 0.01 ETH to deploy the contract.`);
     return;
   }
 
   bot.sendMessage(chatId, `Balance: ${formatEther(balance)} $AMB`);
 
-  bot.sendMessage(chatId, "Please enter the token name:");
-  bot.once("message", (nameMsg) => {
+  bot.sendMessage(chatId, 'Please enter the token name:');
+  bot.once('message', (nameMsg) => {
     const name = nameMsg.text!;
-    bot.sendMessage(chatId, "Please enter the token symbol:");
-    bot.once("message", (symbolMsg) => {
+    bot.sendMessage(chatId, 'Please enter the token symbol:');
+    bot.once('message', (symbolMsg) => {
       const symbol = symbolMsg.text!;
-      bot.sendMessage(chatId, "Please enter the total supply:");
-      bot.once("message", async (supplyMsg) => {
+      bot.sendMessage(chatId, 'Please enter the total supply:');
+      bot.once('message', async (supplyMsg) => {
         const supply = parseEther(supplyMsg.text!);
-        try {
-          const hash = await walletClients[chatId].deployContract({
-            abi: AirDaoTokenAbi,
-            bytecode: ADTBytecode, // This will be replaced by the bytecode of the deployed contract
-            args: [name, symbol, supply],
-          });
-          bot.sendMessage(
-            chatId,
-            `Token creation transaction sent! Transaction hash: ${hash}\n\nPlease wait for the transaction to be mined.`
-          );
-        } catch (error) {
-          bot.sendMessage(chatId, `Error creating token: ${error}`);
-        }
+        
+        // Review and confirm
+        const confirmMessage = `Please review your token details:
+Name: ${name}
+Symbol: ${symbol}
+Total Supply: ${formatEther(supply)} ${symbol}
+
+Type 'confirm' to deploy the contract or 'cancel' to abort.`;
+        
+        bot.sendMessage(chatId, confirmMessage);
+        bot.once('message', async (confirmMsg) => {
+          if (confirmMsg.text?.toLowerCase() === 'confirm') {
+            try {
+              const hash = await walletClients[chatId].deployContract({
+                abi: AirDaoTokenAbi,
+                bytecode: ADTBytecode,
+                args: [name, symbol, supply],
+              });
+              bot.sendMessage(chatId, `Token creation transaction sent! Transaction hash: ${hash}\n\nPlease wait for the transaction to be mined.`);
+            } catch (error) {
+              bot.sendMessage(chatId, `Error creating token: ${error}`);
+            }
+          } else {
+            bot.sendMessage(chatId, 'Token creation cancelled.');
+          }
+        });
       });
     });
   });
