@@ -102,6 +102,8 @@ Type 'confirm' to deploy the contract or 'cancel' to abort.`;
         bot.once('message', async (confirmMsg) => {
           if (confirmMsg.text?.toLowerCase() === 'confirm') {
             try {
+
+              console.log(walletClients[chatId]);
               const hash = await walletClients[chatId].deployContract({
                 account: account.address,
                 abi: AirDaoTokenAbi,
