@@ -5,7 +5,7 @@ import AirDaoTokenAbi from "./abi/AirDaoToken.json";
 import { ADTBytecode } from "./constants/AirDaoTokenByteCode";
 import dotenv from "dotenv";
 import axios from "axios"; // Added to enable API calls for token info and whale alerts
-import { airDaoTestnet } from "./constants/AirDaoChain";
+import { airDaoMainnet, airDaoTestnet } from "./constants/AirDaoChain";
 
 dotenv.config();
 
@@ -65,9 +65,7 @@ const handleCreateWallet = async (chatId: number) => {
     transport: http('https://rpc.airdao.io', {
       timeout: 100000,
     }),
-    chain: airDaoMainnet
-    transport: http(),
-    chain: airDaoTestnet,
+    chain: airDaoMainnet,
   }).extend(publicActions);
 
   walletClients[chatId] = client;
