@@ -16,6 +16,9 @@ import dotenv from "dotenv";
 import axios from "axios";
 import { airDaoMainnet, airDaoTestnet } from "./constants/AirDaoChain";
 import { rootstock, gnosis, mainnet } from "viem/chains";
+import { handleSendMoney } from './utils/sendMoney';
+import { normalize } from 'viem/ens'
+import { formatDistanceToNow } from 'date-fns'
 
 const chains = {
   rootstock,
@@ -38,14 +41,13 @@ const availableChains: { [key: string]: Chain } = {
 
 // Utility Functions
 const getWalletDetails = async (chatId: number) => {
+  console.log("Getting wallet details for chatId:", chatId);
   if (walletClients[chatId]) {
     const address = walletClients[chatId].account.address;
     const balance = await walletClients[chatId].getBalance({ address });
     const chainName = walletClients[chatId].chain.name;
     const nativeCurrency = walletClients[chatId].chain.nativeCurrency.symbol;
-    return `💼 Connected: ${address}\`
-🌐 Network: ${chainName}
-💰 Balance: ${formatEther(balance)} ${nativeCurrency}`;
+    return `💼 Connected: ${address}\n🌐 Network: ${chainName}\n💰 Balance: ${formatEther(balance)} ${nativeCurrency}`;
   } else {
     return "❌ Wallet not connected. Please create or import a wallet.";
   }
@@ -53,6 +55,7 @@ const getWalletDetails = async (chatId: number) => {
 
 // Keyboards
 const getStartKeyboard = (chatId: number) => {
+  console.log("Generating start keyboard for chatId:", chatId);
   const isConnected = !!walletClients[chatId];
   return [
     [{ text: "💼 Wallet", callback_data: "wallet_menu" }],
@@ -61,6 +64,7 @@ const getStartKeyboard = (chatId: number) => {
           [{ text: "🪙 Tokens", callback_data: "tokens_menu" }],
           [{ text: "🌐 Network Settings", callback_data: "network_settings" }],
           [{ text: "📊 Analytics", callback_data: "analytics" }],
+          [{ text: "🏷️ ENS", callback_data: "ens_menu" }], // New ENS option
         ]
       : []),
   ];
@@ -69,6 +73,7 @@ const getStartKeyboard = (chatId: number) => {
 const getWalletKeyboard = (isConnected: boolean) => {
   if (isConnected) {
     return [
+      [{ text: "💸 Send Money", callback_data: "send_money" }],
       [{ text: "🔄 Change Wallet", callback_data: "change_wallet" }],
       [{ text: "🔌 Disconnect Wallet", callback_data: "disconnect_wallet" }],
       [{ text: "🔙 Back", callback_data: "back_to_main" }],
@@ -85,6 +90,7 @@ const getWalletKeyboard = (isConnected: boolean) => {
 const getTokensKeyboard = () => [
   [{ text: "➕ Create Token", callback_data: "create_token" }],
   [{ text: "🏦 My Tokens", callback_data: "my_tokens" }],
+  [{ text: "💸 Transfer Token", callback_data: "transfer_token" }], // New option
   [{ text: "🔙 Back", callback_data: "back_to_main" }],
 ];
 
@@ -115,6 +121,7 @@ bot.onText(/\/start/, async (msg) => {
 
 // Callback query handler
 bot.on("callback_query", async (callbackQuery) => {
+  console.log("Received callback query:", callbackQuery.data);
   const chatId = callbackQuery.message!.chat.id;
   const messageId = callbackQuery.message!.message_id;
   const data = callbackQuery.data;
@@ -185,13 +192,28 @@ bot.on("callback_query", async (callbackQuery) => {
       });
     }
   } else if (data === "back_to_main") {
-    const welcomeMessage = await getWalletDetails(chatId);
-    bot.editMessageText(`👋 Welcome!\n\n${welcomeMessage}`, {
-      chat_id: chatId,
-      message_id: messageId,
-      reply_markup: { inline_keyboard: getStartKeyboard(chatId) },
-      parse_mode: "Markdown",
-    });
+    console.log("Back to main menu triggered");
+    try {
+      const welcomeMessage = await getWalletDetails(chatId);
+      console.log("Welcome message generated:", welcomeMessage);
+      
+      const keyboard = getStartKeyboard(chatId);
+      console.log("Start keyboard generated:", JSON.stringify(keyboard));
+
+      await bot.editMessageText(`👋 Welcome!\n\n${welcomeMessage}`, {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: keyboard },
+        parse_mode: "Markdown",
+      });
+      console.log("Message edited successfully");
+    } catch (error) {
+      console.error("Error in back_to_main handler:", error);
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: "An error occurred. Please try again.",
+        show_alert: true,
+      });
+    }
   } else if (data === "create_wallet") {
     await handleCreateWallet(chatId, messageId);
   } else if (data === "import_wallet") {
@@ -282,6 +304,31 @@ bot.on("callback_query", async (callbackQuery) => {
       message_id: messageId,
       reply_markup: { inline_keyboard: getStartKeyboard(chatId) },
     });
+  } else if (data === "send_money") {
+    handleSendMoney(chatId, messageId, bot, walletClients[chatId]);
+  } else if (data === "transfer_token") {
+    handleTransferToken(chatId, messageId);
+  } else if (data === "ens_menu") {
+    handleENSMenu(chatId, messageId);
+  } else if (data === "ens_lookup") {
+    handleENSLookup(chatId, messageId);
+  } else if (data === "ens_register") {
+    handleENSRegister(chatId, messageId);
+  } else if (data.startsWith("register_ens:")) {
+    const ensName = data.split(":")[1];
+    handleENSRegister(chatId, messageId, ensName);
+  } else if (data.startsWith("confirm_register_ens:")) {
+    const ensName = data.split(":")[1];
+    // Here you would implement the actual ENS registration logic
+    bot.editMessageText(`🔄 Registration process initiated for ${ensName}. Please check your wallet for confirmation.`, {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔙 Back to ENS Menu", callback_data: "ens_menu" }],
+        ],
+      },
+    });
   }
 });
 
@@ -330,7 +377,7 @@ const handleImportWallet = async (
     bot.editMessageText(
       `✅ Wallet imported!\n📍 Address: \`${
         account.address
-      }\`\n💰 Balance: ${formatEther(balance)} $AMB`,
+      }\`\n💰 Balance: ${formatEther(balance)} ${client.chain.nativeCurrency.symbol}`,
       {
         chat_id: chatId,
         message_id: messageId,
@@ -427,7 +474,7 @@ const handleWhaleReport = async (chatId: number, messageId: number) => {
         const { blockchain, symbol, amount_usd, from, to, hash } = transaction;
         bot.sendMessage(
           chatId,
-          `<b>🐳 Whale Alert</b>\n🌐 Blockchain: ${blockchain}\n🪙 Token: ${symbol}\n💵 Amount: $${amount_usd}\n📤 From: ${
+          `<b>🐳 Whale Alert</b>\n Blockchain: ${blockchain}\n🪙 Token: ${symbol}\n💵 Amount: $${amount_usd}\n📤 From: ${
             from.owner || "Unknown"
           }\n📥 To: ${to.owner || "Unknown"}\n🔗 Tx Hash: ${hash}`,
           { parse_mode: "HTML" }
@@ -454,6 +501,190 @@ const handleMyTokens = async (chatId: number, messageId: number) => {
   // This is a placeholder. You'll need to implement the logic to fetch token balances.
   bot.sendMessage(chatId, "🔄 Fetching your token balances...");
   // TODO: Implement token balance fetching logic
+};
+
+// Add this new function to handle token transfers
+const handleTransferToken = (chatId: number, messageId: number) => {
+  bot.editMessageText("💸 Token Transfer\n\nPlease enter the transfer details in the following format:\n\n<token_address> <recipient_address> <amount>", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "🔙 Back to Tokens Menu", callback_data: "tokens_menu" }]
+      ]
+    }
+  });
+
+  // Set up a listener for the next message
+  bot.once("message", async (msg) => {
+    if (msg.text) {
+      const [tokenAddress, recipientAddress, amount] = msg.text.split(" ");
+      
+      if (!tokenAddress || !recipientAddress || !amount) {
+        bot.sendMessage(chatId, "❌ Invalid format. Please try again with the correct format.");
+        return;
+      }
+
+      // Here you would implement the actual token transfer logic
+      // This is a placeholder response
+      bot.sendMessage(chatId, `✅ Transfer initiated:\nToken: ${tokenAddress}\nTo: ${recipientAddress}\nAmount: ${amount}\n\nPlease check your wallet for confirmation.`);
+    } else {
+      bot.sendMessage(chatId, "❌ Invalid input. Please try again.");
+    }
+  });
+};
+
+const handleENSMenu = async (chatId: number, messageId: number) => {
+  if (!walletClients[chatId]) {
+    bot.editMessageText("❌ Please connect a wallet first.", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: getBackToMainKeyboard() },
+    });
+    return;
+  }
+
+  if (walletClients[chatId].chain.id !== mainnet.id) {
+    bot.editMessageText("⚠️ Please switch to Ethereum mainnet to use ENS features.", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔄 Switch to Mainnet", callback_data: "switch_to_chain:mainnet" }],
+          [{ text: "🔙 Back", callback_data: "back_to_main" }],
+        ],
+      },
+    });
+    return;
+  }
+
+  bot.editMessageText("🏷️ ENS Menu", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "🔍 Lookup ENS Name", callback_data: "ens_lookup" }],
+        [{ text: "📝 Register ENS Name", callback_data: "ens_register" }],
+        [{ text: "🔙 Back", callback_data: "back_to_main" }],
+      ],
+    },
+  });
+};
+
+const handleENSLookup = (chatId: number, messageId: number) => {
+  bot.editMessageText("🔍 Enter the ENS name or Ethereum address you want to look up:", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "🔙 Back to ENS Menu", callback_data: "ens_menu" }],
+      ],
+    },
+  });
+
+  bot.once("message", async (msg) => {
+    if (msg.text) {
+      try {
+        let result: string;
+        let ensName: string | null = null;
+        let address: `0x${string}` | null = null;
+        let isAvailableForRegistration = false;
+
+        if (msg.text.endsWith('.eth') || !msg.text.startsWith('0x')) {
+          // Lookup address for ENS name
+          ensName = normalize(msg.text);
+          address = await walletClients[chatId].getEnsAddress({ name: ensName });
+          if (address) {
+            result = `✅ ENS Name: ${ensName}\n👤 Owner: ${address}`;
+          } else {
+            result = `❌ No address found for ${ensName}`;
+            isAvailableForRegistration = true;
+          }
+        } else {
+          // Lookup ENS name for address
+          address = msg.text as `0x${string}`;
+          ensName = await walletClients[chatId].getEnsName({ address });
+          result = ensName ? `✅ Address: ${address}\n🏷️ ENS Name: ${ensName}` : `❌ No ENS name found for ${address}`;
+        }
+
+        // Check expiration if we have a registered ENS name
+        if (ensName && !isAvailableForRegistration) {
+          try {
+            const expiryDate = await walletClients[chatId].getEnsExpiry({ name: ensName });
+            if (expiryDate) {
+              const timeToExpiry = formatDistanceToNow(expiryDate);
+              const isCloseToExpiring = expiryDate.getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000; // 30 days
+              const expiryWarning = isCloseToExpiring ? "⚠️ " : "";
+              result += `\n⏳ Expiry: ${expiryWarning}${timeToExpiry}`;
+            }
+          } catch (error) {
+            console.error('Error fetching ENS expiry:', error);
+          }
+        }
+
+        const inlineKeyboard = [
+          [{ text: "🔍 Look up another", callback_data: "ens_lookup" }],
+          [{ text: "🔙 Back to ENS Menu", callback_data: "ens_menu" }],
+        ];
+
+        if (isAvailableForRegistration) {
+          inlineKeyboard.unshift([{ text: "📝 Register this name", callback_data: `register_ens:${ensName}` }]);
+        }
+
+        bot.sendMessage(chatId, result, {
+          reply_markup: {
+            inline_keyboard: inlineKeyboard,
+          },
+        });
+      } catch (error) {
+        console.error('Error in ENS lookup:', error);
+        bot.sendMessage(chatId, "❌ An error occurred during the lookup. Please try again.", {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🔍 Try again", callback_data: "ens_lookup" }],
+              [{ text: "🔙 Back to ENS Menu", callback_data: "ens_menu" }],
+            ],
+          },
+        });
+      }
+    } else {
+      bot.sendMessage(chatId, "❌ Invalid input. Please enter a valid ENS name or Ethereum address.", {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🔍 Try again", callback_data: "ens_lookup" }],
+            [{ text: "🔙 Back to ENS Menu", callback_data: "ens_menu" }],
+          ],
+        },
+      });
+    }
+  });
+};
+
+const handleENSRegister = (chatId: number, messageId: number, ensName?: string) => {
+  const message = ensName 
+    ? `📝 You're about to register ${ensName}. Please confirm or enter a different name:`
+    : "📝 Enter the ENS name you want to register:";
+
+  bot.editMessageText(message, {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: {
+      inline_keyboard: [
+        ...(ensName ? [[{ text: "✅ Confirm", callback_data: `confirm_register_ens:${ensName}` }]] : []),
+        [{ text: "🔙 Back to ENS Menu", callback_data: "ens_menu" }],
+      ],
+    },
+  });
+
+  if (!ensName) {
+    bot.once("message", async (msg) => {
+      if (msg.text) {
+        handleENSRegister(chatId, messageId, normalize(msg.text));
+      } else {
+        bot.sendMessage(chatId, "❌ Invalid input. Please enter a valid ENS name.");
+      }
+    });
+  }
 };
 
 // /importwallet command
