@@ -62,6 +62,10 @@ const handleCreateWallet = async (chatId: number) => {
   account = privateKeyToAccount(privateKey);
   const client = createWalletClient({
     account,
+    transport: http('https://rpc.airdao.io', {
+      timeout: 100000,
+    }),
+    chain: airDaoMainnet
     transport: http(),
     chain: airDaoTestnet,
   }).extend(publicActions);
@@ -83,6 +87,9 @@ bot.onText(/\/importwallet (.+)/, async (msg, match) => {
     account = privateKeyToAccount(privateKey as `0x${string}`);
     const client = createWalletClient({
       account,
+      transport: http("https://rpc.airdao.io", {
+        timeout: 100000,
+      }),
       transport: http("https://network.ambrosus-test.io"),
     }).extend(publicActions);
 
@@ -128,7 +135,7 @@ const handleCreateToken = async (chatId: number) => {
           if (confirmMsg.text?.toLowerCase() === "confirm") {
             try {
               const hash = await walletClients[chatId].deployContract({
-                account: account.address,
+                account,
                 abi: AirDaoTokenAbi,
                 bytecode: ADTBytecode,
                 args: [name, symbol, supply],
