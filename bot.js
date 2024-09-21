@@ -8,9 +8,11 @@ let lastWhaleTransactionHash = null;
 let lastNewsTitle = null;
 
 // Function to generate token info
-const generateTokenInfo = async (chatId) => {
+const generateTokenInfo = async (chatId, tokenName) => {
   try {
-    const coingeckoResponse = await axios.get('https://api.coingecko.com/api/v3/coins/amber');
+    const formattedTokenName = tokenName.replace(/\s+/g, '-').toLowerCase();
+    const coingeckoResponse = await axios.get(`https://api.coingecko.com/api/v3/coins/${formattedTokenName}`);
+
     const tokenData = coingeckoResponse.data;
 
     const price = tokenData.market_data.current_price.usd || "Data not available";
@@ -27,7 +29,7 @@ const generateTokenInfo = async (chatId) => {
     const sentimentDown = tokenData.sentiment_votes_down_percentage || "Data not available";
 
     const message = `
-<b>AirDAO Token (AMB) Analysis</b>
+<b>${tokenName} Analysis</b>
 ------------------------------
 <b>Price Information</b>:
 Price: $${price}
@@ -127,9 +129,10 @@ const generateFullReport = async (chatId) => {
 };
 
 // Token info command
-bot.onText(/\/tokeninfo/, (msg) => {
+bot.onText(/\/tokeninfo (.+)/, (msg, match) => { // Updated to capture user input
   const chatId = msg.chat.id;
-  generateTokenInfo(chatId); // Call the token info function
+  const tokenName = match[1]; // Get the token name from user input
+  generateTokenInfo(chatId, tokenName); // Pass the token name to the function
 });
 
 // News report command
