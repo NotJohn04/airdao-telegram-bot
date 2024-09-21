@@ -1,11 +1,10 @@
 import TelegramBot from "node-telegram-bot-api";
 import { Account, createWalletClient, formatEther, http, parseEther, publicActions } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
-import { erc20Abi } from "viem";
 import AirDaoTokenAbi from "./abi/AirDaoToken.json";
 import { ADTBytecode } from "./constants/AirDaoTokenByteCode";
 import dotenv from "dotenv";
+import { airDaoTestnet } from "./constants/AirDaoChain";
 
 dotenv.config();
 
@@ -30,7 +29,8 @@ bot.onText(/\/createwallet/, async (msg) => {
   account = privateKeyToAccount(privateKey);
   const client = createWalletClient({
     account,
-    transport: http("https://network.ambrosus-test.io"),
+    transport: http(),
+    chain: airDaoTestnet
   }).extend(publicActions);
 
   walletClients[chatId] = client;
@@ -103,13 +103,16 @@ Type 'confirm' to deploy the contract or 'cancel' to abort.`;
           if (confirmMsg.text?.toLowerCase() === 'confirm') {
             try {
               const hash = await walletClients[chatId].deployContract({
+                account: account.address,
                 abi: AirDaoTokenAbi,
                 bytecode: ADTBytecode,
                 args: [name, symbol, supply],
+                chain: airDaoTestnet,
               });
               bot.sendMessage(chatId, `Token creation transaction sent! Transaction hash: ${hash}\n\nPlease wait for the transaction to be mined.`);
             } catch (error) {
-              bot.sendMessage(chatId, `Error creating token: ${error}`);
+              console.log(error);
+              bot.sendMessage(chatId, `Error creating token`);
             }
           } else {
             bot.sendMessage(chatId, 'Token creation cancelled.');
