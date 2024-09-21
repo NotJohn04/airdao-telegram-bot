@@ -5,8 +5,11 @@ import { sepolia } from "viem/chains";
 import { erc20Abi } from "viem";
 import AirDaoTokenAbi from "./abi/AirDaoToken.json";
 import { ADTBytecode } from "./constants/AirDaoTokenByteCode";
+import dotenv from "dotenv";
 
-const token = "7827805708:AAEKBqIE56ggcH3TVZGCe_O5ZBvXVV_V5_E";
+dotenv.config();
+
+const token = process.env.BOTFATHER_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
 const walletClients: { [key: number]: any } = {};
