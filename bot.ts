@@ -1,11 +1,12 @@
 import TelegramBot from "node-telegram-bot-api";
-import { Account, createWalletClient, formatEther, http, parseEther, publicActions } from "viem";
+import { Account, Chain, createWalletClient, formatEther, http, parseEther, publicActions } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import AirDaoTokenAbi from "./abi/AirDaoToken.json";
 import { ADTBytecode } from "./constants/AirDaoTokenByteCode";
 import dotenv from "dotenv";
 import axios from "axios";
 import { airDaoMainnet, airDaoTestnet } from "./constants/AirDaoChain";
+import {mainnet, rootstock, gnosis} from "viem/chains";
 
 dotenv.config();
 
@@ -13,6 +14,14 @@ const token = process.env.BOTFATHER_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
 const walletClients: { [key: number]: any } = {};
+
+const availableChains: { [key: string]: Chain } = {
+  mainnet,
+  rootstock,
+  gnosis,
+  airDaoMainnet,
+  airDaoTestnet
+};
 
 // Utility Functions
 const getWalletDetails = async (chatId: number) => {
@@ -61,9 +70,9 @@ bot.on("callback_query", async (callbackQuery) => {
   const data = callbackQuery.data;
   
   if (data === "wallet_functionalities") {
-    bot.sendMessage(chatId, `${welcomeMessage}\nWallet Functionalities:`, { reply_markup: { inline_keyboard: walletFunctionalitiesKeyboard() } });
+    bot.sendMessage(chatId, `\nWallet Functionalities:`, { reply_markup: { inline_keyboard: walletFunctionalitiesKeyboard() } });
   } else if (data === "analytics") {
-    bot.sendMessage(chatId, `${welcomeMessage}\nAnalytics:`, { reply_markup: { inline_keyboard: analyticsKeyboard() } });
+    bot.sendMessage(chatId, `\nAnalytics:`, { reply_markup: { inline_keyboard: analyticsKeyboard() } });
   } else if (data === "disconnect_wallet") {
     delete walletClients[chatId];
     bot.sendMessage(chatId, "You have been disconnected from your wallet.");
@@ -81,6 +90,52 @@ bot.on("callback_query", async (callbackQuery) => {
     bot.sendMessage(chatId, "Please enter the token name using the command: /tokeninfo <token_name>");
   } else if (data === "whale_alerts") {
     handleWhaleReport(chatId);
+  } else if (data?.startsWith("select_chain:")) {
+    const chainName = data.split(":")[1];
+    const selectedChain = availableChains[chainName];
+    
+    if (selectedChain) {
+      walletClients[chatId] = createWalletClient({
+        account: walletClients[chatId].account,
+        chain: selectedChain,
+        transport: http()
+      }).extend(publicActions);
+
+      bot.sendMessage(chatId, `Chain switched to ${chainName}. Enter token name:`);
+      bot.once("message", (nameMsg) => {
+        const name = nameMsg.text!;
+        bot.sendMessage(chatId, "Enter token symbol:");
+        bot.once("message", (symbolMsg) => {
+          const symbol = symbolMsg.text!;
+          bot.sendMessage(chatId, "Enter total supply:");
+          bot.once("message", async (supplyMsg) => {
+            const supply = parseEther(supplyMsg.text!);
+            const confirmMessage = `Review token details:\nName: ${name}\nSymbol: ${symbol}\nTotal Supply: ${formatEther(supply)}\nChain: ${chainName}\nType 'confirm' to proceed or 'cancel' to abort.`;
+            bot.sendMessage(chatId, confirmMessage);
+
+            bot.once("message", async (confirmMsg) => {
+              if (confirmMsg.text?.toLowerCase() === "confirm") {
+                try {
+                  const hash = await walletClients[chatId].deployContract({
+                    account: walletClients[chatId].account,
+                    abi: AirDaoTokenAbi,
+                    bytecode: ADTBytecode,
+                    args: [name, symbol, supply],
+                  });
+                  bot.sendMessage(chatId, `Token creation transaction sent on ${chainName}! Transaction hash: ${hash}`);
+                } catch (error) {
+                  bot.sendMessage(chatId, `Error creating token: ${error}`);
+                }
+              } else {
+                bot.sendMessage(chatId, "Token creation cancelled.");
+              }
+            });
+          });
+        });
+      });
+    } else {
+      bot.sendMessage(chatId, "Invalid chain selected. Please try again.");
+    }
   }
 });
 
@@ -128,38 +183,12 @@ const handleCreateToken = async (chatId: number) => {
     return;
   }
 
-  bot.sendMessage(chatId, `Balance: ${formatEther(balance)} $AMB. Enter token name:`);
-  bot.once("message", (nameMsg) => {
-    const name = nameMsg.text!;
-    bot.sendMessage(chatId, "Enter token symbol:");
-    bot.once("message", (symbolMsg) => {
-      const symbol = symbolMsg.text!;
-      bot.sendMessage(chatId, "Enter total supply:");
-      bot.once("message", async (supplyMsg) => {
-        const supply = parseEther(supplyMsg.text!);
-        const confirmMessage = `Review token details:\nName: ${name}\nSymbol: ${symbol}\nTotal Supply: ${formatEther(supply)}\nType 'confirm' to proceed or 'cancel' to abort.`;
-        bot.sendMessage(chatId, confirmMessage);
-
-        bot.once("message", async (confirmMsg) => {
-          if (confirmMsg.text?.toLowerCase() === "confirm") {
-            try {
-              const hash = await walletClients[chatId].deployContract({
-                account: walletClients[chatId].account,
-                abi: AirDaoTokenAbi,
-                bytecode: ADTBytecode,
-                args: [name, symbol, supply],
-                chain: airDaoTestnet,
-              });
-              bot.sendMessage(chatId, `Token creation transaction sent! Transaction hash: ${hash}`);
-            } catch (error) {
-              bot.sendMessage(chatId, `Error creating token: ${error}`);
-            }
-          } else {
-            bot.sendMessage(chatId, "Token creation cancelled.");
-          }
-        });
-      });
-    });
+  bot.sendMessage(chatId, "Select a chain to deploy the token:", {
+    reply_markup: {
+      inline_keyboard: Object.keys(availableChains).map(chainName => [
+        { text: chainName, callback_data: `select_chain:${chainName}` }
+      ])
+    }
   });
 };
 
