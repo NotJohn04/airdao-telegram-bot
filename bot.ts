@@ -4,6 +4,7 @@ import {
   Chain,
   createWalletClient,
   formatEther,
+  Hash,
   http,
   parseEther,
   publicActions,
@@ -123,7 +124,12 @@ bot.on("callback_query", async (callbackQuery) => {
     bot.editMessageText("💼 Wallet Options:", {
       chat_id: chatId,
       message_id: messageId,
-      reply_markup: { inline_keyboard: getWalletKeyboard(isConnected) },
+      reply_markup: { 
+        inline_keyboard: [
+          ...getWalletKeyboard(isConnected),
+          [{ text: "🔙 Back to Main Menu", callback_data: "back_to_main" }]
+        ]
+      },
     });
   } else if (data === "tokens_menu") {
     bot.editMessageText("🪙 Token Options:", {
@@ -227,6 +233,55 @@ bot.on("callback_query", async (callbackQuery) => {
     );
   } else if (data === "whale_alerts") {
     handleWhaleReport(chatId, messageId);
+  } else if (data?.startsWith("deploy_token:")) {
+    const chainName = data.split(":")[1];
+    const selectedChain = availableChains[chainName];
+    
+    // Deploy token logic here
+    // Get the token address from the to address in the transaction
+    const deployTransaction: Hash = await walletClients[chatId].deployContract({
+      abi: AirDaoTokenAbi,
+      bytecode: ADTBytecode,
+      chain: selectedChain,
+    });
+
+    const receipt = await walletClients[chatId].getTransactionReceipt({
+      hash: deployTransaction,
+    });
+
+    const tokenAddress = receipt?.to;
+
+    const explorerUrl = selectedChain.blockExplorers?.default?.url || "";
+    const tokenLink = `${explorerUrl}/address/${tokenAddress}`;
+
+    bot.editMessageText(
+      `✅ Token deployed successfully!\n\n📍 Address: \`${tokenAddress}\`\n🔗 [View on Explorer](${tokenLink})`,
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: getBackToMainKeyboard() },
+      }
+    );
+  } else if (data === "change_wallet") {
+    bot.editMessageText("Choose an option:", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "➕ Create Wallet", callback_data: "create_wallet" }],
+          [{ text: "📥 Import Wallet", callback_data: "import_wallet" }],
+          [{ text: "🔙 Back", callback_data: "wallet_menu" }],
+        ],
+      },
+    });
+  } else if (data === "confirm_private_key") {
+    bot.editMessageText("Wallet created successfully. What would you like to do next?", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: getStartKeyboard(chatId) },
+    });
   }
 });
 
@@ -247,8 +302,12 @@ const handleCreateWallet = async (chatId: number, messageId: number) => {
     {
       chat_id: chatId,
       message_id: messageId,
-      reply_markup: { inline_keyboard: getBackToMainKeyboard() },
       parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "I've saved my private key", callback_data: "confirm_private_key" }],
+        ],
+      },
     }
   );
 };
@@ -318,7 +377,7 @@ const handleCreateToken = async (chatId: number, messageId: number) => {
     message_id: messageId,
     reply_markup: {
       inline_keyboard: Object.keys(availableChains).map((chainName) => [
-        { text: chainName, callback_data: `select_chain:${chainName}` },
+        { text: chainName, callback_data: `deploy_token:${chainName}` },
       ]),
     },
   });
