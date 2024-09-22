@@ -16,7 +16,7 @@ import { ADTBytecode } from "./constants/AirDaoTokenByteCode";
 import dotenv from "dotenv";
 import axios from "axios";
 import { airDaoMainnet, airDaoTestnet } from "./constants/AirDaoChain";
-import { rootstock, gnosis, mainnet } from "viem/chains";
+import { rootstock, gnosis, mainnet, rootstockTestnet, gnosisChiado } from "viem/chains";
 import { handleSendMoney } from './utils/sendMoney';
 import { normalize } from 'viem/ens'
 import { formatDistanceToNow } from 'date-fns'
@@ -26,6 +26,8 @@ const chains = {
   rootstock,
   gnosis,
   mainnet,
+  rootstockTestnet,
+  gnosisChiado,
 };
 
 dotenv.config();
