@@ -170,9 +170,10 @@ bot.on("callback_query", async (callbackQuery) => {
     const selectedChain = availableChains[chainName];
 
     if (selectedChain && walletClients[chatId]) {
+      // Create a new wallet client with the selected chain
       walletClients[chatId] = createWalletClient({
         account: walletClients[chatId].account,
-        chain: walletClients[chatId].chain,
+        chain: selectedChain,
         transport: http(),
       }).extend(publicActions);
 
