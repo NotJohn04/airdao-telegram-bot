@@ -219,23 +219,7 @@ bot.on("callback_query", async (callbackQuery) => {
   } else if (data === "create_wallet") {
     await handleCreateWallet(chatId, messageId);
   } else if (data === "import_wallet") {
-    bot.editMessageText("🔑 Please enter your private key:", {
-      chat_id: chatId,
-      message_id: messageId,
-      reply_markup: { inline_keyboard: getImportWalletKeyboard() },
-    });
-    bot.once("message", async (msg) => {
-      if (msg.text === undefined) {
-        bot.editMessageText("❌ Invalid input. Please try again.", {
-          chat_id: chatId,
-          message_id: messageId,
-          reply_markup: { inline_keyboard: getBackToMainKeyboard() },
-        });
-        return;
-      }
-      const privateKey = msg.text;
-      await handleImportWallet(chatId, messageId, privateKey);
-    });
+    handleImportWallet(chatId, messageId);
   } else if (data === "disconnect_wallet") {
     delete walletClients[chatId];
     bot.editMessageText("🔌 You have been disconnected from your wallet.", {
@@ -348,6 +332,8 @@ bot.on("callback_query", async (callbackQuery) => {
   } else if (data === "ens_watch" || data.startsWith("ens_watch:")) {
     const filter = data.split(":")[1] ? parseInt(data.split(":")[1]) : undefined;
     handleENSWatch(chatId, messageId, filter);
+  } else if (data === 'watch_expiring_names') {
+    await handleWatchExpiringNames(chatId, messageId);
   }
 });
 
@@ -378,39 +364,40 @@ const handleCreateWallet = async (chatId: number, messageId: number) => {
   );
 };
 
-const handleImportWallet = async (
-  chatId: number,
-  messageId: number,
-  privateKey: string
-) => {
-  try {
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    const client = createWalletClient({
-      account,
-      transport: http("https://rpc.airdao.io", { timeout: 100000 }),
-      chain: airDaoMainnet,
-    }).extend(publicActions);
+const handleImportWallet = async (chatId: number, messageId: number) => {
+  bot.editMessageText("Please enter your private key:", {
+    chat_id: chatId,
+    message_id: messageId,
+  });
 
-    walletClients[chatId] = client;
-    const balance = await client.getBalance({ address: account.address });
-    bot.editMessageText(
-      `✅ Wallet imported!\n📍 Address: \`${
-        account.address
-      }\`\n💰 Balance: ${formatEther(balance)} ${client.chain.nativeCurrency.symbol}`,
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        reply_markup: { inline_keyboard: getBackToMainKeyboard() },
-        parse_mode: "Markdown",
+  bot.once("message", async (msg) => {
+    if (msg.text) {
+      try {
+        const privateKey = msg.text as `0x${string}`;
+        const account = privateKeyToAccount(privateKey);
+        
+        walletClients[chatId] = createWalletClient({
+          account,
+          chain: mainnet,
+          transport: http(),
+        }).extend(publicActions);
+
+        // Delete the message containing the private key
+        await bot.deleteMessage(chatId, msg.message_id);
+
+        const welcomeMessage = await getWalletDetails(chatId);
+        bot.sendMessage(chatId, `✅ Wallet imported successfully!\n\n${welcomeMessage}`, {
+          reply_markup: { inline_keyboard: getStartKeyboard(chatId) },
+          parse_mode: "Markdown",
+        });
+      } catch (error) {
+        console.error("Error importing wallet:", error);
+        bot.sendMessage(chatId, "❌ Invalid private key. Please try again.");
       }
-    );
-  } catch (error) {
-    bot.editMessageText("❌ Invalid private key. Please try again.", {
-      chat_id: chatId,
-      message_id: messageId,
-      reply_markup: { inline_keyboard: getBackToMainKeyboard() },
-    });
-  }
+    } else {
+      bot.sendMessage(chatId, "❌ Invalid input. Please try again.");
+    }
+  });
 };
 
 const handleCreateToken = async (chatId: number, messageId: number) => {
@@ -768,12 +755,56 @@ const handleENSWatch = async (chatId: number, messageId: number, filter?: number
   }
 };
 
+const handleWatchExpiringNames = async (chatId: number, messageId: number) => {
+  try {
+    bot.editMessageText("Enter a name length to filter (or 'skip' to show all):", {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+    const lengthMsg = await new Promise<{ text?: string }>(resolve => bot.once('message', resolve));
+    const nameLength = lengthMsg.text?.toLowerCase() === 'skip' ? undefined : parseInt(lengthMsg.text || '');
+
+    bot.editMessageText("Fetching expiring ENS names...", {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+
+    const expiringNames = await fetchExpiringEnsNames(nameLength);
+
+    if (expiringNames.length === 0) {
+      bot.editMessageText("No expiring ENS names found matching the criteria.", {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: getBackToMainKeyboard() },
+      });
+      return;
+    }
+
+    const messageText = expiringNames.map(({ name, daysUntilExpiry }) => 
+      `${name}: expires in ${daysUntilExpiry} days`
+    ).join('\n');
+
+    bot.editMessageText(`Expiring ENS names${nameLength ? ` (length: ${nameLength})` : ''}:\n\n${messageText}`, {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: getBackToMainKeyboard() },
+    });
+  } catch (error) {
+    console.error("Error fetching expiring ENS names:", error);
+    bot.editMessageText("An error occurred while fetching expiring ENS names. Please try again later.", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: getBackToMainKeyboard() },
+    });
+  }
+};
+
 // /importwallet command
 bot.onText(/\/importwallet (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const privateKey = match![1];
   const sentMsg = await bot.sendMessage(chatId, "Importing wallet...");
-  handleImportWallet(chatId, sentMsg.message_id, privateKey);
+  handleImportWallet(chatId, sentMsg.message_id);
 });
 
 // /createwallet command
