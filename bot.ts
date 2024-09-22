@@ -19,6 +19,7 @@ import { rootstock, gnosis, mainnet } from "viem/chains";
 import { handleSendMoney } from './utils/sendMoney';
 import { normalize } from 'viem/ens'
 import { formatDistanceToNow } from 'date-fns'
+import { fetchExpiringEnsNames } from './utils/fetchEns';
 
 const chains = {
   rootstock,
@@ -171,7 +172,7 @@ bot.on("callback_query", async (callbackQuery) => {
     if (selectedChain && walletClients[chatId]) {
       walletClients[chatId] = createWalletClient({
         account: walletClients[chatId].account,
-        chain: selectedChain,
+        chain: walletClients[chatId].chain,
         transport: http(),
       }).extend(publicActions);
 
@@ -256,36 +257,50 @@ bot.on("callback_query", async (callbackQuery) => {
   } else if (data === "whale_alerts") {
     handleWhaleReport(chatId, messageId);
   } else if (data?.startsWith("deploy_token:")) {
-    const chainName = data.split(":")[1];
+    const [_, chainName, tokenName, symbol, totalSupply] = data.split(":");
     const selectedChain = availableChains[chainName];
     
-    // Deploy token logic here
-    // Get the token address from the to address in the transaction
-    const deployTransaction: Hash = await walletClients[chatId].deployContract({
-      abi: AirDaoTokenAbi,
-      bytecode: ADTBytecode,
-      chain: selectedChain,
-    });
+    if (!selectedChain) {
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: "❌ Invalid chain selected. Please try again.",
+        show_alert: true,
+      });
+      return;
+    }
 
-    const receipt = await walletClients[chatId].getTransactionReceipt({
-      hash: deployTransaction,
-    });
+    try {
+      // Deploy token logic here
+      const deployTransaction: Hash = await walletClients[chatId].deployContract({
+        abi: AirDaoTokenAbi,
+        bytecode: ADTBytecode,
+        chain: selectedChain,
+        args: [tokenName, symbol, BigInt(totalSupply)], // Pass the arguments to the constructor
+      });
 
-    const tokenAddress = receipt?.to;
+      const receipt = await walletClients[chatId].waitForTransactionReceipt({ hash: deployTransaction });
+      const tokenAddress = receipt.contractAddress;
 
-    const explorerUrl = selectedChain.blockExplorers?.default?.url || "";
-    const tokenLink = `${explorerUrl}/address/${tokenAddress}`;
-
-    bot.editMessageText(
-      `✅ Token deployed successfully!\n\n📍 Address: \`${tokenAddress}\`\n🔗 [View on Explorer](${tokenLink})`,
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: { inline_keyboard: getBackToMainKeyboard() },
-      }
-    );
+      bot.editMessageText(
+        `✅ Token deployed successfully!\n\n📍 Address: \`${tokenAddress}\`\n🔗 [View on Explorer](${selectedChain.blockExplorers?.default.url}/address/${tokenAddress})`,
+        {
+          chat_id: chatId,
+          message_id: messageId,
+          parse_mode: "Markdown",
+          disable_web_page_preview: true,
+          reply_markup: { inline_keyboard: getBackToMainKeyboard() },
+        }
+      );
+    } catch (error) {
+      console.error("Error deploying token:", error);
+      bot.editMessageText(
+        "❌ An error occurred while deploying the token. Please try again.",
+        {
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: { inline_keyboard: getBackToMainKeyboard() },
+        }
+      );
+    }
   } else if (data === "change_wallet") {
     bot.editMessageText("Choose an option:", {
       chat_id: chatId,
@@ -329,6 +344,9 @@ bot.on("callback_query", async (callbackQuery) => {
         ],
       },
     });
+  } else if (data === "ens_watch" || data.startsWith("ens_watch:")) {
+    const filter = data.split(":")[1] ? parseInt(data.split(":")[1]) : undefined;
+    handleENSWatch(chatId, messageId, filter);
   }
 });
 
@@ -419,14 +437,35 @@ const handleCreateToken = async (chatId: number, messageId: number) => {
     return;
   }
 
-  bot.editMessageText("🌐 Select a chain to deploy the token:", {
+  bot.editMessageText("Please enter the token details in the following format:\n\n<token_name> <symbol> <total_supply>\n\nFor example: MyToken MTK 1000000", {
     chat_id: chatId,
     message_id: messageId,
     reply_markup: {
-      inline_keyboard: Object.keys(availableChains).map((chainName) => [
-        { text: chainName, callback_data: `deploy_token:${chainName}` },
-      ]),
+      inline_keyboard: [
+        [{ text: "🔙 Back", callback_data: "tokens_menu" }],
+      ],
     },
+  });
+
+  bot.once("message", async (msg) => {
+    if (msg.text) {
+      const [tokenName, symbol, totalSupply] = msg.text.split(" ");
+      
+      if (!tokenName || !symbol || !totalSupply) {
+        bot.sendMessage(chatId, "❌ Invalid format. Please try again with the correct format.");
+        return;
+      }
+
+      bot.sendMessage(chatId, "🌐 Select a chain to deploy the token:", {
+        reply_markup: {
+          inline_keyboard: Object.keys(availableChains).map((chainName) => [
+            { text: chainName, callback_data: `deploy_token:${chainName}:${tokenName}:${symbol}:${totalSupply}` },
+          ]),
+        },
+      });
+    } else {
+      bot.sendMessage(chatId, "❌ Invalid input. Please try again.");
+    }
   });
 };
 
@@ -565,6 +604,7 @@ const handleENSMenu = async (chatId: number, messageId: number) => {
       inline_keyboard: [
         [{ text: "🔍 Lookup ENS Name", callback_data: "ens_lookup" }],
         [{ text: "📝 Register ENS Name", callback_data: "ens_register" }],
+        [{ text: "👀 Watch Expiring Names", callback_data: "ens_watch" }], // New button
         [{ text: "🔙 Back", callback_data: "back_to_main" }],
       ],
     },
@@ -683,6 +723,46 @@ const handleENSRegister = (chatId: number, messageId: number, ensName?: string) 
       } else {
         bot.sendMessage(chatId, "❌ Invalid input. Please enter a valid ENS name.");
       }
+    });
+  }
+};
+
+// Add this new function to handle the ENS Watch feature
+const handleENSWatch = async (chatId: number, messageId: number, filter?: number) => {
+  const filterOptions = [
+    [
+      { text: "3 Letters", callback_data: "ens_watch:3" },
+      { text: "4 Letters", callback_data: "ens_watch:4" },
+      { text: "5 Letters", callback_data: "ens_watch:5" },
+      { text: "6 Letters", callback_data: "ens_watch:6" },
+    ],
+    [{ text: "All Names", callback_data: "ens_watch" }],
+    [{ text: "🔙 Back to ENS Menu", callback_data: "ens_menu" }],
+  ];
+
+  try {
+    const expiringNames = await fetchExpiringEnsNames(filter);
+    let message = "👀 Expiring ENS Names:\n\n";
+    expiringNames.forEach((name, index) => {
+      message += `${index + 1}. ${name.name} - Expires in ${name.daysUntilExpiry} days\n`;
+    });
+
+    if (expiringNames.length === 0) {
+      message = "No expiring names found with the current filter.";
+    }
+
+    bot.editMessageText(message, {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: filterOptions },
+      parse_mode: "Markdown",
+    });
+  } catch (error) {
+    console.error('Error fetching expiring ENS names:', error);
+    bot.editMessageText("❌ An error occurred while fetching expiring ENS names. Please try again.", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: filterOptions },
     });
   }
 };
