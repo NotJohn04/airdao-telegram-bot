@@ -27,7 +27,7 @@ export const expiringEnsQuery = gql`
       where: { 
         name_not: null, 
         labelName_not: null,
-        expiryDate_gt: $currentDate
+        expiryDate_gt: $currentDate,
       }
     ) {
       id

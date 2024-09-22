@@ -43,6 +43,9 @@ const availableChains: { [key: string]: Chain } = {
   airDaoTestnet,
 };
 
+// Add this at the top of your file, outside of any function
+const tempPrivateKeys: { [key: string]: string } = {};
+
 // Utility Functions
 const getWalletDetails = async (chatId: number) => {
   console.log("Getting wallet details for chatId:", chatId);
@@ -67,8 +70,7 @@ const getStartKeyboard = (chatId: number) => {
       ? [
           [{ text: "🪙 Tokens", callback_data: "tokens_menu" }],
           [{ text: "🌐 Network Settings", callback_data: "network_settings" }],
-          [{ text: "📊 Analytics", callback_data: "analytics" }],
-          [{ text: "🏷️ ENS", callback_data: "ens_menu" }], // New ENS option
+          [{ text: "🏷️ ENS", callback_data: "ens_menu" }],
         ]
       : []),
   ];
@@ -262,7 +264,7 @@ bot.on("callback_query", async (callbackQuery) => {
         abi: AirDaoTokenAbi,
         bytecode: ADTBytecode,
         chain: selectedChain,
-        args: [tokenName, symbol, BigInt(totalSupply)], // Pass the arguments to the constructor
+        args: [tokenName, symbol, parseEther(totalSupply)], // Pass the arguments to the constructor
       });
 
       const receipt = await walletClients[chatId].waitForTransactionReceipt({ hash: deployTransaction });
@@ -337,6 +339,33 @@ bot.on("callback_query", async (callbackQuery) => {
     handleENSWatch(chatId, messageId, filter);
   } else if (data === 'watch_expiring_names') {
     await handleWatchExpiringNames(chatId, messageId);
+  } else if (data.startsWith("reveal_private_key:")) {
+    const keyId = data.split(":")[1];
+    const privateKey = tempPrivateKeys[keyId];
+    if (privateKey) {
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: `Your private key is: ${privateKey}`,
+        show_alert: true
+      });
+      // Optionally, delete the key from memory after revealing
+      delete tempPrivateKeys[keyId];
+    } else {
+      bot.answerCallbackQuery(callbackQuery.id, {
+        text: "Private key not found or expired. Please create a new wallet.",
+        show_alert: true
+      });
+    }
+  } else if (data === "ens_register_switch_network") {
+    bot.editMessageText("⚠️ You need to be on Ethereum mainnet to register an ENS name.", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔄 Switch to Mainnet", callback_data: "switch_to_chain:mainnet" }],
+          [{ text: "🔙 Back to ENS Menu", callback_data: "ens_menu" }],
+        ],
+      },
+    });
   }
 });
 
@@ -352,14 +381,24 @@ const handleCreateWallet = async (chatId: number, messageId: number) => {
 
   walletClients[chatId] = client;
 
+  // Generate a unique identifier for this private key
+  const keyId = Date.now().toString();
+  tempPrivateKeys[keyId] = privateKey;
+
+  // Set a timeout to delete the private key from memory after 5 minutes
+  setTimeout(() => {
+    delete tempPrivateKeys[keyId];
+  }, 5 * 60 * 1000);
+
   bot.editMessageText(
-    `✅ Wallet created!\n📍 Address: \`${account.address}\`\n🔑 Private Key: \`${privateKey}\`\n⚠️ Keep your private key safe!`,
+    `✅ Wallet created!\n📍 Address: \`${account.address}\`\n🔑 Private Key: [HIDDEN]\n\n⚠️ Keep your private key safe! Click 'Reveal Private Key' to view it.`,
     {
       chat_id: chatId,
       message_id: messageId,
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
+          [{ text: "👁️ Reveal Private Key", callback_data: `reveal_private_key:${keyId}` }],
           [{ text: "I've saved my private key", callback_data: "confirm_private_key" }],
         ],
       },
@@ -579,19 +618,7 @@ const handleENSMenu = async (chatId: number, messageId: number) => {
     return;
   }
 
-  if (walletClients[chatId].chain.id !== mainnet.id) {
-    bot.editMessageText("⚠️ Please switch to Ethereum mainnet to use ENS features.", {
-      chat_id: chatId,
-      message_id: messageId,
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🔄 Switch to Mainnet", callback_data: "switch_to_chain:mainnet" }],
-          [{ text: "🔙 Back", callback_data: "back_to_main" }],
-        ],
-      },
-    });
-    return;
-  }
+  const isMainnet = walletClients[chatId].chain.id === mainnet.id;
 
   bot.editMessageText("🏷️ ENS Menu", {
     chat_id: chatId,
@@ -599,8 +626,8 @@ const handleENSMenu = async (chatId: number, messageId: number) => {
     reply_markup: {
       inline_keyboard: [
         [{ text: "🔍 Lookup ENS Name", callback_data: "ens_lookup" }],
-        [{ text: "📝 Register ENS Name", callback_data: "ens_register" }],
-        [{ text: "👀 Watch Expiring Names", callback_data: "ens_watch" }], // New button
+        //[{ text: "📝 Register ENS Name", callback_data: isMainnet ? "ens_register" : //"ens_register_switch_network" }],
+        [{ text: "👀 Watch Expiring Names", callback_data: "ens_watch" }],
         [{ text: "🔙 Back", callback_data: "back_to_main" }],
       ],
     },
