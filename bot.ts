@@ -3,6 +3,7 @@ import {
   Account,
   Chain,
   createWalletClient,
+  erc20Abi,
   formatEther,
   Hash,
   http,
@@ -552,9 +553,14 @@ const handleTransferToken = (chatId: number, messageId: number) => {
         return;
       }
 
-      // Here you would implement the actual token transfer logic
-      // This is a placeholder response
-      bot.sendMessage(chatId, `✅ Transfer initiated:\nToken: ${tokenAddress}\nTo: ${recipientAddress}\nAmount: ${amount}\n\nPlease check your wallet for confirmation.`);
+      const hash = await walletClients[chatId].writeContract({
+        address: tokenAddress,
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: [recipientAddress, amount],
+      });
+
+      bot.sendMessage(chatId, `✅ Transfer initiated:\nToken: ${tokenAddress}\nTo: ${recipientAddress}\nAmount: ${amount}\n\nPlease check your wallet for confirmation. 🔗 [View on Explorer](${walletClients[chatId].chain.blockExplorers.default.url}/tx/${hash})`);
     } else {
       bot.sendMessage(chatId, "❌ Invalid input. Please try again.");
     }

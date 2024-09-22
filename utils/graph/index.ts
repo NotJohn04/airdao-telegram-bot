@@ -19,7 +19,7 @@ export const ensQuery = gql`{
   }`;
 
 export const expiringEnsQuery = gql`
-  query ExpiringDomains($first: Int!, $currentDate: BigInt!) {
+  query ExpiringDomains($first: Int!, $currentDate: Int!) {
     domains(
       first: $first,
       orderBy: expiryDate,
