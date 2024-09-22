@@ -23,10 +23,8 @@ export const expiringEnsQuery = gql`
     domains(
       first: $first,
       orderBy: expiryDate,
-      orderDirection: desc,
+      orderDirection: asc,
       where: { 
-        name_not: null, 
-        labelName_not: null,
         expiryDate_gt: $currentDate,
       }
     ) {

@@ -119,7 +119,7 @@ bot.onText(/\/start/, async (msg) => {
   const welcomeMessage = await getWalletDetails(chatId);
   const keyboard = getStartKeyboard(chatId);
 
-  bot.sendMessage(chatId, `👋 Welcome!\n\n${welcomeMessage}`, {
+  bot.sendMessage(chatId, `👋 Welcome to the AirBot!\n\n${welcomeMessage}`, {
     reply_markup: { inline_keyboard: keyboard },
     parse_mode: "Markdown",
   });
@@ -426,6 +426,9 @@ const handleImportWallet = async (chatId: number, messageId: number) => {
 
         // Delete the message containing the private key
         await bot.deleteMessage(chatId, msg.message_id);
+
+        // Delete the "Please enter your private key:" message
+        await bot.deleteMessage(chatId, messageId);
 
         const welcomeMessage = await getWalletDetails(chatId);
         bot.sendMessage(chatId, `✅ Wallet imported successfully!\n\n${welcomeMessage}`, {
@@ -753,13 +756,7 @@ const handleENSRegister = (chatId: number, messageId: number, ensName?: string) 
 // Add this new function to handle the ENS Watch feature
 const handleENSWatch = async (chatId: number, messageId: number, filter?: number) => {
   const filterOptions = [
-    [
-      { text: "3 Letters", callback_data: "ens_watch:3" },
-      { text: "4 Letters", callback_data: "ens_watch:4" },
-      { text: "5 Letters", callback_data: "ens_watch:5" },
-      { text: "6 Letters", callback_data: "ens_watch:6" },
-    ],
-    [{ text: "All Names", callback_data: "ens_watch" }],
+
     [{ text: "🔙 Back to ENS Menu", callback_data: "ens_menu" }],
   ];
 
@@ -767,7 +764,7 @@ const handleENSWatch = async (chatId: number, messageId: number, filter?: number
     const expiringNames = await fetchExpiringEnsNames(filter);
     let message = "👀 Expiring ENS Names:\n\n";
     expiringNames.forEach((name, index) => {
-      message += `${index + 1}. ${name.name} - Expires in ${name.daysUntilExpiry} days\n`;
+      message += `${index + 1}. ${name.name} - Expires in ${name.timeUntilExpiry.days}d ${name.timeUntilExpiry.hours}h ${name.timeUntilExpiry.minutes}m\n`;
     });
 
     if (expiringNames.length === 0) {
@@ -815,8 +812,8 @@ const handleWatchExpiringNames = async (chatId: number, messageId: number) => {
       return;
     }
 
-    const messageText = expiringNames.map(({ name, daysUntilExpiry }) => 
-      `${name}: expires in ${daysUntilExpiry} days`
+    const messageText = expiringNames.map(({ name, timeUntilExpiry }) => 
+      `${name}: expires in ${timeUntilExpiry.days}d ${timeUntilExpiry.hours}h ${timeUntilExpiry.minutes}m`
     ).join('\n');
 
     bot.editMessageText(`Expiring ENS names${nameLength ? ` (length: ${nameLength})` : ''}:\n\n${messageText}`, {
