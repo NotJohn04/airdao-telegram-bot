@@ -458,7 +458,7 @@ const handleCreateToken = async (chatId: number, messageId: number) => {
   const balance = await walletClients[chatId].getBalance({
     address: walletClients[chatId].account.address,
   });
-  if (balance < parseEther("0.01")) {
+  if (balance < parseEther("0.01") && walletClients[chatId].chain.id !== rootstockTestnet.id) {
     bot.editMessageText(
       "⚠️ Insufficient balance. You need at least 0.01 ETH to deploy the contract.",
       {
